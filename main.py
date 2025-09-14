@@ -15,6 +15,8 @@ from statistics import mode
 from contextlib import redirect_stdout
 import matplotlib.pyplot as plt
 from pandas.plotting import register_matplotlib_converters
+import pickle
+import os
 
 # Disable a specific pandas warning
 warnings.filterwarnings('ignore')
@@ -24,6 +26,9 @@ register_matplotlib_converters()
 API_KEY = "97564c78d6a7b0723ad21e6c6d3b8dee"
 LATITUDE = 4.7156
 LONGITUDE = 8.125
+RISK_MODEL_PATH = "flood_risk_model.pkl"
+PREDICTION_MODEL_PATH = "flood_prediction_model.pkl"
+TIDE_ARIMA_MODEL_PATH = "tide_arima_model.pkl"
 # --- End Configuration ---
 
 # Page configuration
@@ -55,32 +60,34 @@ def get_current_weather(lat, lon, api_key):
 
 @st.cache_data(ttl=21600)
 def get_historical_weather(lat, lon, days=30):
-    """Fetch historical weather data using Meteostat"""
+    """Fetch historical weather data using Meteostat and interpolate missing values."""
     try:
         location = Point(lat, lon)
         end = datetime.now()
         start = end - timedelta(days=days)
         data = Daily(location, start, end)
         data = data.fetch()
+
         if data.empty:
             return None
+
+        # --- FIX: Interpolate missing values in 'prcp' and 'tavg' columns ---
+        data['prcp'] = data['prcp'].interpolate(method='linear', limit_direction='both')
+        data['tavg'] = data['tavg'].interpolate(method='linear', limit_direction='both')
+        # --- End FIX ---
+
         return data
     except Exception as e:
         st.error(f"Error fetching historical weather: {str(e)}")
         return None
 
-def train_risk_model(historical_data):
-    """Train a simple linear regression model for flood risk."""
+def train_and_save_risk_model(historical_data):
+    """Train a simple linear regression model for flood risk and save it."""
     df = historical_data.copy()
-
-    # NEW: Drop rows with missing precipitation data before training
     df.dropna(subset=['prcp'], inplace=True)
-
-    # Check if there's any data left after dropping NaNs
     if df.empty:
-        st.error("No valid historical data available for risk model training after removing missing values.")
+        st.error("No valid historical data available for risk model training.")
         return None
-
     df['historical_risk_score'] = 0
     df.loc[df['prcp'] > 50, 'historical_risk_score'] = 40
     df.loc[(df['prcp'] > 20) & (df['prcp'] <= 50), 'historical_risk_score'] = 20
@@ -89,13 +96,14 @@ def train_risk_model(historical_data):
     y = df['historical_risk_score']
     model = LinearRegression()
     model.fit(X, y)
+    with open(RISK_MODEL_PATH, 'wb') as f:
+        pickle.dump(model, f)
     return model
 
 def predict_flood_risk(model, current_precip):
     """Predict flood risk using the trained ML model."""
     if model is None:
         return 0, "UNKNOWN", []
-
     predicted_score = model.predict([[current_precip]])[0]
     predicted_score = max(0, min(100, predicted_score))
     risk_factors = []
@@ -258,31 +266,37 @@ def ttidePredict(raw_data, start_date, end_date, interval, time_col, tidal_col, 
     raw_data[time_col] = pd.to_datetime(raw_data[time_col], dayfirst=True)
     predic_time = pd.date_range(start=start_date, end=end_date, freq=interval)
 
-    # Train the model on the entire dataset
     input_dict = inputDict1(raw_data, time_col, tidal_col)
     coef, _ = ttideAnalyse(raw_data, time_col, tidal_col, latitude)
     if coef is None:
         st.stop()
     msl = coef['z0']
 
-    # Prepare data for residuals
     observed_time_num = date2num(input_dict['time'].to_pydatetime())
     astro_pred_observed = coef(observed_time_num) + msl
     residuals = input_dict['depth'] - astro_pred_observed
 
     n_periods = len(predic_time)
     residual_pred_future = np.zeros(n_periods)
-    st.write("Fitting Auto ARIMA model to residuals...")
-    try:
-        residuals_series = pd.Series(residuals)
-        arima_model = pm.auto_arima(residuals_series.dropna(), seasonal=False, stepwise=True,
-                                    suppress_warnings=True, error_action='ignore')
-        residual_pred_future = arima_model.predict(n_periods=n_periods)
-    except Exception as e:
-        st.error(f"Auto ARIMA model failed: {e}. Cannot proceed with hybrid model.")
-        st.stop()
 
-    # Perform prediction
+    if os.path.exists(TIDE_ARIMA_MODEL_PATH):
+        st.write("Loading pre-trained ARIMA model for tide residuals...")
+        with open(TIDE_ARIMA_MODEL_PATH, 'rb') as f:
+            arima_model = pickle.load(f)
+    else:
+        st.write("Fitting Auto ARIMA model to residuals...")
+        try:
+            residuals_series = pd.Series(residuals)
+            arima_model = pm.auto_arima(residuals_series.dropna(), seasonal=False, stepwise=True,
+                                        suppress_warnings=True, error_action='ignore')
+            with open(TIDE_ARIMA_MODEL_PATH, 'wb') as f:
+                pickle.dump(arima_model, f)
+        except Exception as e:
+            st.error(f"Auto ARIMA model failed: {e}. Cannot proceed with hybrid model.")
+            st.stop()
+
+    residual_pred_future = arima_model.predict(n_periods=n_periods)
+
     astro_pred_future = coef(date2num(predic_time.to_pydatetime())) + msl
     if astro_pred_future.shape[0] != residual_pred_future.shape[0]:
         st.error("Prediction failed: Harmonic prediction and residual prediction have different lengths.")
@@ -308,7 +322,7 @@ def ttidePredict(raw_data, start_date, end_date, interval, time_col, tidal_col, 
 
 # --- Sidebar Navigation ---
 st.sidebar.title("Dashboard Navigation")
-selected_page = st.sidebar.radio("Go to", ["Flood Risk Monitoring", "Tide Prediction Analysis"])
+selected_page = st.sidebar.radio("Go to", ["Flood Risk Monitoring", "Future Flood Prediction", "Tide Prediction Analysis"])
 
 # --- Main Page Content ---
 if selected_page == "Flood Risk Monitoring":
@@ -325,7 +339,14 @@ if selected_page == "Flood Risk Monitoring":
         wind_speed = current_weather['wind']['speed']
         precipitation = current_weather.get('rain', {}).get('1h', 0)
 
-        model = train_risk_model(historical_data)
+        # Load or train the flood risk model
+        if os.path.exists(RISK_MODEL_PATH):
+            st.write("Loading pre-trained flood risk model...")
+            with open(RISK_MODEL_PATH, 'rb') as f:
+                model = pickle.load(f)
+        else:
+            st.write("Training flood risk model...")
+            model = train_and_save_risk_model(historical_data)
 
         if model:
             risk_score, risk_level, risk_factors = predict_flood_risk(model, precipitation)
@@ -363,40 +384,41 @@ if selected_page == "Flood Risk Monitoring":
 
             st.header("📈 Trend Analysis")
 
-            temperature_chart = create_temperature_trend_chart(historical_data)
-            if temperature_chart:
-                st.plotly_chart(temperature_chart, use_container_width=True)
-
             precipitation_chart = create_precipitation_trend_chart(historical_data)
             if precipitation_chart:
                 st.plotly_chart(precipitation_chart, use_container_width=True)
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("30-Day Statistics")
-                avg_precip = historical_data['prcp'].mean()
-                max_precip = historical_data['prcp'].max()
-                total_precip = historical_data['prcp'].sum()
-                st.metric("Average Daily Precipitation", f"{avg_precip:.1f} mm")
-                st.metric("Maximum Daily Precipitation", f"{max_precip:.1f} mm")
-                st.metric("Total Precipitation", f"{total_precip:.1f} mm")
-            with col2:
-                st.subheader("Recent Trends")
-                recent_avg = historical_data['prcp'].tail(7).mean()
-                previous_avg = historical_data['prcp'].iloc[-14:-7].mean()
-                trend_change = recent_avg - previous_avg
-                st.metric("7-Day Average", f"{recent_avg:.1f} mm")
-                st.metric("Previous Week Average", f"{previous_avg:.1f} mm")
-                st.metric("Weekly Change", f"{trend_change:+.1f} mm")
-            st.subheader("Precipitation Distribution")
-            hist_fig = px.histogram(
-                historical_data,
-                x='prcp',
-                nbins=20,
-                title="Distribution of Daily Precipitation",
-                labels={'prcp': 'Precipitation (mm)', 'count': 'Frequency'}
-            )
-            st.plotly_chart(hist_fig, use_container_width=True)
+            temperature_chart = create_temperature_trend_chart(historical_data)
+            if temperature_chart:
+                st.plotly_chart(temperature_chart, use_container_width=True)
+
+            if 'prcp' in historical_data.columns and not historical_data['prcp'].isnull().all():
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("30-Day Statistics")
+                    avg_precip = historical_data['prcp'].mean()
+                    max_precip = historical_data['prcp'].max()
+                    total_precip = historical_data['prcp'].sum()
+                    st.metric("Average Daily Precipitation", f"{avg_precip:.1f} mm")
+                    st.metric("Maximum Daily Precipitation", f"{max_precip:.1f} mm")
+                    st.metric("Total Precipitation", f"{total_precip:.1f} mm")
+                with col2:
+                    st.subheader("Recent Trends")
+                    recent_avg = historical_data['prcp'].tail(7).mean()
+                    previous_avg = historical_data['prcp'].iloc[-14:-7].mean()
+                    trend_change = recent_avg - previous_avg
+                    st.metric("7-Day Average", f"{recent_avg:.1f} mm")
+                    st.metric("Previous Week Average", f"{previous_avg:.1f} mm")
+                    st.metric("Weekly Change", f"{trend_change:+.1f} mm")
+                st.subheader("Precipitation Distribution")
+                hist_fig = px.histogram(
+                    historical_data,
+                    x='prcp',
+                    nbins=20,
+                    title="Distribution of Daily Precipitation",
+                    labels={'prcp': 'Precipitation (mm)', 'count': 'Frequency'}
+                )
+                st.plotly_chart(hist_fig, use_container_width=True)
 
             st.sidebar.markdown("---")
             if st.sidebar.button("🔄 Refresh Data"):
@@ -408,7 +430,7 @@ if selected_page == "Flood Risk Monitoring":
 
     st.markdown("""
     ---
- 
+  
     ### Risk Assessment Factors:
     -   Current precipitation intensity
     -   Wind speed conditions
@@ -416,24 +438,86 @@ if selected_page == "Flood Risk Monitoring":
     -   Soil saturation indicators
     """)
 
+elif selected_page == "Future Flood Prediction":
+    st.title("🔮 Future Flood Prediction")
+    st.markdown("Predicting future flood risk based on forecasted precipitation using a machine learning model.")
+
+    historical_data = get_historical_weather(LATITUDE, LONGITUDE, days=365) # Using more data for better prediction
+
+    if historical_data is not None and not historical_data.empty:
+
+        # Load or train the flood prediction model
+        if os.path.exists(PREDICTION_MODEL_PATH):
+            st.write("Loading pre-trained precipitation prediction model...")
+            with open(PREDICTION_MODEL_PATH, 'rb') as f:
+                model = pickle.load(f)
+        else:
+            st.write("Training precipitation prediction model...")
+            df = historical_data.dropna(subset=['prcp'])
+            if df.empty:
+                st.error("No valid historical precipitation data for model training.")
+                st.stop()
+            try:
+                model = pm.auto_arima(df['prcp'], seasonal=False, stepwise=True,
+                                    suppress_warnings=True, error_action='ignore')
+                with open(PREDICTION_MODEL_PATH, 'wb') as f:
+                    pickle.dump(model, f)
+            except Exception as e:
+                st.error(f"Failed to train prediction model: {e}")
+                st.stop()
+
+        days_to_predict = st.slider("Select number of days to predict:", 1, 30, 7)
+
+        forecast, conf_int = model.predict(n_periods=days_to_predict, return_conf_int=True)
+        forecast_dates = pd.date_range(start=historical_data.index[-1] + timedelta(days=1), periods=days_to_predict)
+
+        forecast_df = pd.DataFrame({'Date': forecast_dates, 'Predicted Precipitation': forecast})
+
+        st.subheader("Future Precipitation Forecast")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=historical_data.index, y=historical_data['prcp'], name='Observed', line=dict(color='#2c3e50')))
+        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=forecast_df['Predicted Precipitation'], name='Forecast', line=dict(color='#3498db', dash='dash')))
+        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 1], name='Upper Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
+        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 0], name='Lower Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
+
+        fig.update_layout(title='Precipitation Forecast', xaxis_title='Date', yaxis_title='Precipitation (mm)', hovermode='x unified')
+        st.plotly_chart(fig, use_container_width=True)
+
+        max_precip_forecast = forecast.max()
+        avg_precip_forecast = forecast.mean()
+
+        st.subheader("Predicted Flood Risk")
+
+        if max_precip_forecast > 50:
+            st.error("🚨 **High Risk:** The model predicts a high chance of heavy rainfall events within the forecast period.")
+        elif max_precip_forecast > 20:
+            st.warning("⚡ **Medium Risk:** Moderate precipitation is forecasted, which could lead to flooding in low-lying areas.")
+        else:
+            st.success("✅ **Low Risk:** The forecast indicates low precipitation, with a minimal risk of flooding.")
+
+        st.info(f"The highest forecasted daily precipitation is {max_precip_forecast:.1f} mm, with an average of {avg_precip_forecast:.1f} mm per day over the next {days_to_predict} days.")
+
+    else:
+        st.error("Failed to fetch sufficient historical weather data to train the prediction model.")
+
 elif selected_page == "Tide Prediction Analysis":
     st.title("🌊 Tide Prediction Analysis")
-    st.markdown("This section reads data from a pre-defined file path to generate tide predictions.")
+
 
     try:
         raw_data = pd.read_csv(r'C:\Users\Olajumoke\Downloads\TideCompiled.csv')
+        st.write("Raw Data Preview:")
+        st.write(raw_data.head())
 
         with st.expander("Tide Prediction Tools", expanded=True):
-            st.write("Raw Data:")
-            st.write(raw_data.head())
-
-            raw_data['DateTime'] = pd.to_datetime(raw_data['DateTime'], dayfirst=True)
-
             tab1, tab2 = st.tabs(["Tide Data", "Prediction Parameters"])
             with tab1:
                 st.write("Select Columns for Time and Tidal Data")
                 time_column = st.selectbox('Select Time Column', raw_data.columns, index=list(raw_data.columns).index('DateTime') if 'DateTime' in raw_data.columns else 0)
                 tidal_column = st.selectbox('Select Tidal Value Column', raw_data.columns, index=list(raw_data.columns).index('Tide(m)') if 'Tide(m)' in raw_data.columns else 0)
+
+            raw_data[time_column] = pd.to_datetime(raw_data[time_column], dayfirst=True)
+
             with tab2:
                 st.write("Input Prediction Parameters")
                 latitude = st.number_input("Enter Latitude:", min_value=-90.0, max_value=90.0, value=4.7156)
@@ -463,7 +547,7 @@ elif selected_page == "Tide Prediction Analysis":
 
             if st.checkbox('Plot Observed Data'):
                 fig, ax = plt.subplots(figsize=(12, 6))
-                ax.plot(pd.to_datetime(raw_data[time_column], dayfirst=True), raw_data[tidal_column], label='Observed Tide')
+                ax.plot(raw_data[time_column], raw_data[tidal_column], label='Observed Tide')
                 ax.set_xlabel('Time')
                 ax.set_ylabel('Tide Level')
                 ax.set_title('Observed Tide Data')
@@ -471,4 +555,7 @@ elif selected_page == "Tide Prediction Analysis":
                 ax.grid(True)
                 st.pyplot(fig)
     except FileNotFoundError:
-        st.error(f"Error: The file could not be found. Please ensure the file 'TideCompiled.csv' exists at the specified path on your local machine. If you are running this in a web environment, direct file access is not possible.")
+        st.error(f"Error: The file could not be found. Please ensure the file 'TideCompiled.csv' exists at the specified path on your local machine.")
+    except Exception as e:
+        st.error(f"An error occurred while processing the file: {e}")
+        st.info("Please ensure your CSV file has the correct columns and a valid format.")
