@@ -72,6 +72,15 @@ def get_historical_weather(lat, lon, days=30):
 def train_risk_model(historical_data):
     """Train a simple linear regression model for flood risk."""
     df = historical_data.copy()
+
+    # NEW: Drop rows with missing precipitation data before training
+    df.dropna(subset=['prcp'], inplace=True)
+
+    # Check if there's any data left after dropping NaNs
+    if df.empty:
+        st.error("No valid historical data available for risk model training after removing missing values.")
+        return None
+
     df['historical_risk_score'] = 0
     df.loc[df['prcp'] > 50, 'historical_risk_score'] = 40
     df.loc[(df['prcp'] > 20) & (df['prcp'] <= 50), 'historical_risk_score'] = 20
@@ -84,6 +93,9 @@ def train_risk_model(historical_data):
 
 def predict_flood_risk(model, current_precip):
     """Predict flood risk using the trained ML model."""
+    if model is None:
+        return 0, "UNKNOWN", []
+
     predicted_score = model.predict([[current_precip]])[0]
     predicted_score = max(0, min(100, predicted_score))
     risk_factors = []
@@ -314,87 +326,89 @@ if selected_page == "Flood Risk Monitoring":
         precipitation = current_weather.get('rain', {}).get('1h', 0)
 
         model = train_risk_model(historical_data)
-        risk_score, risk_level, risk_factors = predict_flood_risk(model, precipitation)
 
-        st.header("🌤️ Current Weather Conditions")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Temperature", f"{temp}°C")
-        with col2:
-            st.metric("Wind Speed", f"{wind_speed} m/s")
-        with col3:
-            st.metric("Precipitation", f"{precipitation} mm/h")
+        if model:
+            risk_score, risk_level, risk_factors = predict_flood_risk(model, precipitation)
 
-        st.header("🚨 Flood Risk Assessment")
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.metric("Risk Level", risk_level)
-            st.metric("Risk Score", f"{risk_score:.0f}/100")
-            gauge_fig = create_risk_gauge(risk_score)
-            st.plotly_chart(gauge_fig, use_container_width=True)
-        with col2:
-            st.subheader("Risk Factors")
-            if risk_factors:
-                for factor in risk_factors:
-                    st.write(f"• {factor}")
-            else:
-                st.write("• No significant risk factors detected")
-            st.subheader("Recommendations")
-            if risk_level == "HIGH":
-                st.error("⚠️ High flood risk detected! Avoid low-lying areas and monitor local alerts.")
-            elif risk_level == "MEDIUM":
-                st.warning("⚡ Moderate flood risk. Stay alert and avoid flood-prone areas.")
-            else:
-                st.success("✅ Low flood risk. Normal precautions apply.")
+            st.header("🌤️ Current Weather Conditions")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Temperature", f"{temp}°C")
+            with col2:
+                st.metric("Wind Speed", f"{wind_speed} m/s")
+            with col3:
+                st.metric("Precipitation", f"{precipitation} mm/h")
 
-        st.header("📈 Trend Analysis")
+            st.header("🚨 Flood Risk Assessment")
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.metric("Risk Level", risk_level)
+                st.metric("Risk Score", f"{risk_score:.0f}/100")
+                gauge_fig = create_risk_gauge(risk_score)
+                st.plotly_chart(gauge_fig, use_container_width=True)
+            with col2:
+                st.subheader("Risk Factors")
+                if risk_factors:
+                    for factor in risk_factors:
+                        st.write(f"• {factor}")
+                else:
+                    st.write("• No significant risk factors detected")
+                st.subheader("Recommendations")
+                if risk_level == "HIGH":
+                    st.error("⚠️ High flood risk detected! Avoid low-lying areas and monitor local alerts.")
+                elif risk_level == "MEDIUM":
+                    st.warning("⚡ Moderate flood risk. Stay alert and avoid flood-prone areas.")
+                else:
+                    st.success("✅ Low flood risk. Normal precautions apply.")
 
-        temperature_chart = create_temperature_trend_chart(historical_data)
-        if temperature_chart:
-            st.plotly_chart(temperature_chart, use_container_width=True)
+            st.header("📈 Trend Analysis")
 
-        precipitation_chart = create_precipitation_trend_chart(historical_data)
-        if precipitation_chart:
-            st.plotly_chart(precipitation_chart, use_container_width=True)
+            temperature_chart = create_temperature_trend_chart(historical_data)
+            if temperature_chart:
+                st.plotly_chart(temperature_chart, use_container_width=True)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("30-Day Statistics")
-            avg_precip = historical_data['prcp'].mean()
-            max_precip = historical_data['prcp'].max()
-            total_precip = historical_data['prcp'].sum()
-            st.metric("Average Daily Precipitation", f"{avg_precip:.1f} mm")
-            st.metric("Maximum Daily Precipitation", f"{max_precip:.1f} mm")
-            st.metric("Total Precipitation", f"{total_precip:.1f} mm")
-        with col2:
-            st.subheader("Recent Trends")
-            recent_avg = historical_data['prcp'].tail(7).mean()
-            previous_avg = historical_data['prcp'].iloc[-14:-7].mean()
-            trend_change = recent_avg - previous_avg
-            st.metric("7-Day Average", f"{recent_avg:.1f} mm")
-            st.metric("Previous Week Average", f"{previous_avg:.1f} mm")
-            st.metric("Weekly Change", f"{trend_change:+.1f} mm")
-        st.subheader("Precipitation Distribution")
-        hist_fig = px.histogram(
-            historical_data,
-            x='prcp',
-            nbins=20,
-            title="Distribution of Daily Precipitation",
-            labels={'prcp': 'Precipitation (mm)', 'count': 'Frequency'}
-        )
-        st.plotly_chart(hist_fig, use_container_width=True)
+            precipitation_chart = create_precipitation_trend_chart(historical_data)
+            if precipitation_chart:
+                st.plotly_chart(precipitation_chart, use_container_width=True)
 
-        st.sidebar.markdown("---")
-        if st.sidebar.button("🔄 Refresh Data"):
-            st.cache_data.clear()
-            st.rerun()
-        st.sidebar.markdown(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("30-Day Statistics")
+                avg_precip = historical_data['prcp'].mean()
+                max_precip = historical_data['prcp'].max()
+                total_precip = historical_data['prcp'].sum()
+                st.metric("Average Daily Precipitation", f"{avg_precip:.1f} mm")
+                st.metric("Maximum Daily Precipitation", f"{max_precip:.1f} mm")
+                st.metric("Total Precipitation", f"{total_precip:.1f} mm")
+            with col2:
+                st.subheader("Recent Trends")
+                recent_avg = historical_data['prcp'].tail(7).mean()
+                previous_avg = historical_data['prcp'].iloc[-14:-7].mean()
+                trend_change = recent_avg - previous_avg
+                st.metric("7-Day Average", f"{recent_avg:.1f} mm")
+                st.metric("Previous Week Average", f"{previous_avg:.1f} mm")
+                st.metric("Weekly Change", f"{trend_change:+.1f} mm")
+            st.subheader("Precipitation Distribution")
+            hist_fig = px.histogram(
+                historical_data,
+                x='prcp',
+                nbins=20,
+                title="Distribution of Daily Precipitation",
+                labels={'prcp': 'Precipitation (mm)', 'count': 'Frequency'}
+            )
+            st.plotly_chart(hist_fig, use_container_width=True)
+
+            st.sidebar.markdown("---")
+            if st.sidebar.button("🔄 Refresh Data"):
+                st.cache_data.clear()
+                st.rerun()
+            st.sidebar.markdown(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     else:
         st.error("Failed to fetch weather data. Please ensure the API key is valid and historical data is available.")
 
     st.markdown("""
     ---
-
+ 
     ### Risk Assessment Factors:
     -   Current precipitation intensity
     -   Wind speed conditions
@@ -423,7 +437,7 @@ elif selected_page == "Tide Prediction Analysis":
             with tab2:
                 st.write("Input Prediction Parameters")
                 latitude = st.number_input("Enter Latitude:", min_value=-90.0, max_value=90.0, value=4.7156)
-                st.info("The model is trained on historical dataset to generate the most accurate predictions. You can select any date range below to visualize the results.")
+                st.info("The model is trained on the full historical dataset to generate the most accurate predictions. You can select any date range below to visualize the results.")
                 start_date = st.date_input("Start date for prediction:", value=raw_data[time_column].min().date())
                 end_date = st.date_input("End date for prediction:", value=raw_data[time_column].max().date() + timedelta(days=30))
                 interval_options = {"1 Hour": 'h', "30 Minutes": '30min', "15 Minutes": '15min'}
