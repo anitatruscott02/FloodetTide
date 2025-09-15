@@ -505,7 +505,7 @@ elif selected_page == "Tide Prediction Analysis":
 
 
     try:
-        raw_data = pd.read_csv(r'C:\Users\Olajumoke\Downloads\TideCompiled.csv')
+        raw_data = pd.read_csv('TideCompiled.csv')
         st.write("Raw Data Preview:")
         st.write(raw_data.head())
 
