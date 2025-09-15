@@ -153,11 +153,7 @@ def create_temperature_trend_chart(historical_data):
         y=historical_data['tavg'],
         mode='lines+markers',
         name='Daily Average Temperature',
-<<<<<<< HEAD
         line=dict(color='#e74c3c', width=2),
-=======
-        line=dict(color='#008000', width=2),
->>>>>>> 2af73c4a46b628f4a0265b420a86a28a0616ecad
         marker=dict(size=6, color='#e74c3c')
     ))
     fig.update_layout(
@@ -434,7 +430,7 @@ if selected_page == "Flood Risk Monitoring":
 
     st.markdown("""
     ---
-  
+    
     ### Risk Assessment Factors:
     -   Current precipitation intensity
     -   Wind speed conditions
@@ -442,13 +438,8 @@ if selected_page == "Flood Risk Monitoring":
     -   Soil saturation indicators
     """)
 
-<<<<<<< HEAD
 elif selected_page == "Future Flood Prediction":
     st.title("🔮 Future Flood Prediction")
-=======
-elif selected_page == "Future Flood Risk Prediction":
-    st.title("🔮 Future Flood Risk Prediction")
->>>>>>> 2af73c4a46b628f4a0265b420a86a28a0616ecad
     st.markdown("Predicting future flood risk based on forecasted precipitation using a machine learning model.")
 
     historical_data = get_historical_weather(LATITUDE, LONGITUDE, days=365) # Using more data for better prediction
@@ -468,7 +459,7 @@ elif selected_page == "Future Flood Risk Prediction":
                 st.stop()
             try:
                 model = pm.auto_arima(df['prcp'], seasonal=False, stepwise=True,
-                                    suppress_warnings=True, error_action='ignore')
+                                     suppress_warnings=True, error_action='ignore')
                 with open(PREDICTION_MODEL_PATH, 'wb') as f:
                     pickle.dump(model, f)
             except Exception as e:
@@ -486,12 +477,9 @@ elif selected_page == "Future Flood Risk Prediction":
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=historical_data.index, y=historical_data['prcp'], name='Observed', line=dict(color='#2c3e50')))
         fig.add_trace(go.Scatter(x=forecast_df['Date'], y=forecast_df['Predicted Precipitation'], name='Forecast', line=dict(color='#3498db', dash='dash')))
-<<<<<<< HEAD
         fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 1], name='Upper Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
         fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 0], name='Lower Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
-=======
         
->>>>>>> 2af73c4a46b628f4a0265b420a86a28a0616ecad
 
         fig.update_layout(title='Precipitation Forecast', xaxis_title='Date', yaxis_title='Precipitation (mm)', hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
@@ -518,11 +506,7 @@ elif selected_page == "Tide Prediction Analysis":
 
 
     try:
-<<<<<<< HEAD
-        raw_data = pd.read_csv(r'C:\Users\Olajumoke\Downloads\TideCompiled.csv')
-=======
         raw_data = pd.read_csv('TideCompiled.csv')
->>>>>>> 2af73c4a46b628f4a0265b420a86a28a0616ecad
         st.write("Raw Data Preview:")
         st.write(raw_data.head())
 
