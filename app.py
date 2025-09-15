@@ -477,8 +477,6 @@ elif selected_page == "Future Flood Prediction":
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=historical_data.index, y=historical_data['prcp'], name='Observed', line=dict(color='#2c3e50')))
         fig.add_trace(go.Scatter(x=forecast_df['Date'], y=forecast_df['Predicted Precipitation'], name='Forecast', line=dict(color='#3498db', dash='dash')))
-        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 1], name='Upper Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
-        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 0], name='Lower Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
         
 
         fig.update_layout(title='Precipitation Forecast', xaxis_title='Date', yaxis_title='Precipitation (mm)', hovermode='x unified')
