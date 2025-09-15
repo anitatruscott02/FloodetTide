@@ -10,7 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the zipped ttide library and install the utility to extract it
 COPY ttide_py-master.rar .
-RUN apt-get update && apt-get install -y --no-install-recommends unrar && rm -rf /var/lib/apt/lists/*
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends unrar && rm -rf /var/lib/apt/lists/*
 RUN unrar x ttide_py-master.rar && rm ttide_py-master.rar
 
 # Run the installation command from inside the extracted folder
