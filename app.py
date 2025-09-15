@@ -153,7 +153,7 @@ def create_temperature_trend_chart(historical_data):
         y=historical_data['tavg'],
         mode='lines+markers',
         name='Daily Average Temperature',
-        line=dict(color='#e74c3c', width=2),
+        line=dict(color='#008000', width=2),
         marker=dict(size=6, color='#e74c3c')
     ))
     fig.update_layout(
@@ -438,8 +438,8 @@ if selected_page == "Flood Risk Monitoring":
     -   Soil saturation indicators
     """)
 
-elif selected_page == "Future Flood Prediction":
-    st.title("🔮 Future Flood Prediction")
+elif selected_page == "Future Flood Risk Prediction":
+    st.title("🔮 Future Flood Risk Prediction")
     st.markdown("Predicting future flood risk based on forecasted precipitation using a machine learning model.")
 
     historical_data = get_historical_weather(LATITUDE, LONGITUDE, days=365) # Using more data for better prediction
@@ -477,8 +477,7 @@ elif selected_page == "Future Flood Prediction":
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=historical_data.index, y=historical_data['prcp'], name='Observed', line=dict(color='#2c3e50')))
         fig.add_trace(go.Scatter(x=forecast_df['Date'], y=forecast_df['Predicted Precipitation'], name='Forecast', line=dict(color='#3498db', dash='dash')))
-        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 1], name='Upper Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
-        fig.add_trace(go.Scatter(x=forecast_df['Date'], y=conf_int[:, 0], name='Lower Confidence Interval', fill='tonexty', fillcolor='rgba(52, 152, 219, 0.2)', line=dict(width=0)))
+        
 
         fig.update_layout(title='Precipitation Forecast', xaxis_title='Date', yaxis_title='Precipitation (mm)', hovermode='x unified')
         st.plotly_chart(fig, use_container_width=True)
