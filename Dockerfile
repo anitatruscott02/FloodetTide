@@ -5,7 +5,7 @@ FROM debian:buster-slim
 WORKDIR /app
 
 # Install Python and pip
-RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+RUN apt-get clean && apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
 
 # Copy the requirements.txt file and install dependencies
