@@ -31,7 +31,7 @@ Expose port 8501 for Streamlit.
 EXPOSE 8501
 
 #Command to run the Streamlit app.
-WHEN This is the command that gets executed when the container starts.
-The --server.port and --server.address flags are essential for running
-Streamlit correctly inside a Docker container.
+#WHEN This is the command that gets executed when the container starts.
+#The --server.port and --server.address flags are essential for running
+#Streamlit correctly inside a Docker container.
 CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
