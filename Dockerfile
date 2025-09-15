@@ -1,28 +1,26 @@
-# Start with a more robust base image
-FROM debian:buster-slim
+# Start with the base Python image
+FROM python:3.9-slim
 
 # Set the working directory
 WORKDIR /app
 
-# Install Python and pip
-RUN apt-get clean && apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1
+# Install git to allow pip to install from a git repository
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements.txt file and install dependencies
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Add non-free repositories to the sources list
-RUN echo "deb http://deb.debian.org/debian/ stable main contrib non-free" >> /etc/apt/sources.list
+# Copy the ttide library folder and install it using setup.py
+# Assuming the unzipped folder is named ttide_py-master and is in the same directory as the Dockerfile
+COPY ttide_py-master/ ./ttide_py-master/
 
-# Copy the zipped ttide library and install the utility to extract it
-COPY ttide_py-master.rar .
-RUN apt-get clean && apt-get update
-RUN apt-get install -y --no-install-recommends unrar && rm -rf /var/lib/apt/lists/*
-RUN unrar x ttide_py-master.rar && rm ttide_py-master.rar
-
-# Run the installation command from inside the extracted folder
+# Change directory and install the library
+WORKDIR ttide_py-master
 RUN python setup.py install
+
+# Change back to the main app directory
+WORKDIR /app
 
 # Copy all necessary data and model files into the container
 COPY TideCompiled.csv .
