@@ -1,0 +1,6 @@
+# Ignore files and directories that aren't needed in the Docker image
+.git
+.gitignore
+__pycache__
+*.pyc
+.venv/
